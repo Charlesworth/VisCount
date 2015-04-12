@@ -1,22 +1,39 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"github.com/boltdb/bolt"
 	"github.com/julienschmidt/httprouter"
 	"log"
 	"net/http"
-	"strconv"
 )
 
-var C chan string = make(chan string)
+var BoltReadChannel = make(chan string)
+var BoltWriteChannel = make(chan DataPoint)
+
+type DataPoint struct {
+	PageName    string
+	ViewCount   int
+	UniqueViews int
+}
+
+//buckets = days, new bucket for each day
+//key = page name, value = cumulative views
+//key = unique views, value = unique ids that day
+
+//maybe use an atomic counter for page veiws or a mutex
+
+//maybe use a map implemented as a set for the list of IPs
+//where the key is the ip and the value is anything (bool for small size)
+//you can use map len to find unique views for the day
+
+//bucket = unique ids
+//set a count at the start of a day, the increase by the end of the day is the unique views value from above
+
+//use a ticker to signal storing of the days bucket
 
 func main() {
-
-	db := startDB()
-	defer db.Close()
-
-	go writeToDB(C, db)
 
 	router := httprouter.New()
 	router.GET("/count/:pageID", countHandler)
@@ -30,7 +47,13 @@ func main() {
 
 func countHandler(w http.ResponseWriter, r *http.Request, params httprouter.Params) {
 	log.Println(r.RemoteAddr + " requests " + params.ByName("pageID"))
-	C <- params.ByName("pageID")
+	//either
+	//update ip map with mutex
+	//add pageID atomic counter
+
+	//or
+	//ipLogger (bufferred channel) <- IP address
+	//viewLogger (buffered channel) <- page ID
 }
 
 func statsHandler(w http.ResponseWriter, r *http.Request, params httprouter.Params) {
@@ -44,55 +67,6 @@ func statsHandler(w http.ResponseWriter, r *http.Request, params httprouter.Para
 
 }
 
-//BoltDB can only have one writ connection at a time, so a single goRoutine#
-//manages all of the writes. The page ID is send via channel C and it then
-//checks if already there in the DB and writes a new view count value depending.
-func writeToDB(c chan string, db *bolt.DB) {
-	//Infinite Loop
-	for {
-		select {
-		//when we recieve a message from the channel C
-		case msg1 := <-c:
-			fmt.Println("message received: " + msg1)
-			//open a read/write connection with the DB
-			db.Update(func(tx *bolt.Tx) error {
-				//find Key msg1 and retrieve the value
-				value := tx.Bucket([]byte("viewCount")).Get([]byte(msg1))
-				s, _ := strconv.Atoi(string(value))
-				fmt.Println("incoming value ", s)
-
-				//If key returned nil then write the first value = 1
-				if value == nil {
-					tx.Bucket([]byte("viewCount")).Put([]byte(msg1), []byte("1"))
-					fmt.Println("first time")
-					return nil
-
-					//else read the value, and write value++
-				} else {
-					g := s + 1
-					tx.Bucket([]byte("viewCount")).Put([]byte(msg1), []byte(string(g)))
-					fmt.Println(g)
-					return nil
-				}
-			})
-		}
-	}
-}
-
-func startDB() *bolt.DB {
-	db, err := bolt.Open("veiwCount.db", 0600, nil)
-	errFatal(err)
-
-	db.Update(func(tx *bolt.Tx) error {
-		// Create a bucket.
-		tx.CreateBucketIfNotExists([]byte("viewCount"))
-
-		return nil
-	})
-
-	return db
-}
-
 func errFatal(err error) {
 	if err != nil {
 		log.Fatal(err)
@@ -102,5 +76,63 @@ func errFatal(err error) {
 func errLog(err error) {
 	if err != nil {
 		log.Print(err)
+	}
+}
+
+func boltWriteClient() {
+	boltClient, err := bolt.Open("viewCounter.db", 0600, nil)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer boltClient.Close()
+
+	//do we need to check a bucket exists or make one
+	boltClient.Update(func(tx *bolt.Tx) error {
+		// Create a bucket.
+		tx.CreateBucketIfNotExists([]byte("m"))
+		return nil
+	})
+
+	fmt.Println("bolt writer ready")
+
+	for {
+
+		m := <-BoltWriteChannel
+		mjson, err := json.Marshal(m)
+		errLog(err)
+		boltClient.Update(func(tx *bolt.Tx) error {
+			// Set the value "bar" for the key "foo".
+			err = tx.Bucket([]byte("m")).Put([]byte("poo"), []byte(mjson)) //need the bucket id for this
+			errLog(err)
+			return nil
+		})
+
+	}
+}
+
+func boltReadClient() {
+	boltClient, err := bolt.Open("viewCounter.db", 0600, nil) //maybe change the 600 to a read only value
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer boltClient.Close()
+
+	fmt.Println("bolt reader ready")
+
+	for {
+		id := <-BoltReadChannel
+
+		var b []byte
+		boltClient.View(func(tx *bolt.Tx) error {
+			// Set the value "bar" for the key "foo".
+			b = tx.Bucket([]byte("m")).Get([]byte(id))
+			errLog(err)
+
+			return nil
+		})
+
+		//var mjson Message
+		//err := json.Unmarshal(b, &mjson)
+
 	}
 }
