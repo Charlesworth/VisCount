@@ -8,12 +8,14 @@ import (
 	"log"
 	"net/http"
 	"runtime"
+	"strconv"
 	"sync"
 	"time"
 )
 
 var BoltReadChannel = make(chan string)
-var BoltWriteChannel = make(chan DataPoint)
+
+//var BoltWriteChannel = make(chan DataPoint)
 
 var counter = struct {
 	sync.RWMutex
@@ -25,13 +27,11 @@ var ips = struct {
 	m map[string]bool
 }{m: make(map[string]bool)}
 
-type DataPoint struct { //possibly change to map[string]int instead of pageName and Viewcount
-	PageName    string
-	ViewCount   int
-	UniqueViews int
+type IPList struct {
+	IPs map[string]bool
 }
 
-type SavePoint struct { //test
+type SavePoint struct {
 	PageCounts  map[string]int
 	UniqueViews int
 }
@@ -76,10 +76,9 @@ func statsHandler(w http.ResponseWriter, r *http.Request, params httprouter.Para
 		fmt.Fprintln(w, counter.m)
 		counter.RUnlock()
 
-		counter.RLock()
+		ips.RLock()
 		fmt.Fprintln(w, "unique ips: ", len(ips.m))
-		counter.RUnlock()
-
+		ips.RUnlock()
 	} else {
 		fmt.Fprintln(w, "access denied")
 	}
@@ -107,31 +106,52 @@ func boltWriteClient() {
 	//do we need to check a bucket exists or make one
 	boltClient.Update(func(tx *bolt.Tx) error {
 		// Create a bucket.
-		tx.CreateBucketIfNotExists([]byte("m"))
+		tx.CreateBucketIfNotExists([]byte("historicData"))
 		return nil
 	})
 
 	fmt.Println("bolt writer ready")
 
 	//start a ticker for auto uploading
-	ticker := time.NewTicker(time.Second * 20)
+	ticker := time.NewTicker(time.Hour)
 
 	for {
-		select {
-		case m := <-BoltWriteChannel:
-			mjson, err := json.Marshal(m)
-			errLog(err)
-			boltClient.Update(func(tx *bolt.Tx) error {
-				// Set the value "bar" for the key "foo".
-				err = tx.Bucket([]byte("m")).Put([]byte("poo"), []byte(mjson)) //need the bucket id for this
-				errLog(err)
-				return nil
-			})
 
-		case <-ticker.C:
-			log.Println("Tick")
-			//auto upload code here
+		<-ticker.C
+		log.Println("Tick")
+
+		date := strconv.Itoa((time.Now().YearDay() * 10000) + time.Now().Year())
+		fmt.Println(date)
+
+		counter.RLock()
+		ips.RLock()
+
+		m1 := SavePoint{
+			PageCounts:  counter.m,
+			UniqueViews: len(ips.m),
 		}
+
+		m2 := IPList{
+			IPs: ips.m,
+		}
+
+		counter.RUnlock()
+		ips.RUnlock()
+
+		m1json, err := json.Marshal(m1)
+		errLog(err)
+		m2json, err := json.Marshal(m2)
+		errLog(err)
+		boltClient.Update(func(tx *bolt.Tx) error {
+
+			err = tx.Bucket([]byte("historicData")).Put([]byte(date), []byte(m1json))
+			errLog(err)
+
+			err = tx.Bucket([]byte("historicData")).Put([]byte("IPs"), []byte(m2json))
+			errLog(err)
+			return nil
+		})
+
 	}
 }
 
