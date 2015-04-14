@@ -42,7 +42,7 @@ func main() {
 	runtime.GOMAXPROCS(procNo)
 	fmt.Println("Using", procNo, "processors for maximum thread count")
 
-	go uploader()
+	go boltWriteClient()
 
 	router := httprouter.New()
 	router.GET("/count/:pageID", countHandler)
@@ -85,16 +85,6 @@ func statsHandler(w http.ResponseWriter, r *http.Request, params httprouter.Para
 	}
 }
 
-func uploader() {
-	//ticker := time.NewTicker(time.Hour)
-	ticker := time.NewTicker(time.Second * 50)
-
-	for t := range ticker.C {
-		fmt.Println("Tick at", t)
-		//upload the count and unique IP to Bolt
-	}
-}
-
 func errFatal(err error) {
 	if err != nil {
 		log.Fatal(err)
@@ -123,18 +113,25 @@ func boltWriteClient() {
 
 	fmt.Println("bolt writer ready")
 
+	//start a ticker for auto uploading
+	ticker := time.NewTicker(time.Second * 20)
+
 	for {
-
-		m := <-BoltWriteChannel
-		mjson, err := json.Marshal(m)
-		errLog(err)
-		boltClient.Update(func(tx *bolt.Tx) error {
-			// Set the value "bar" for the key "foo".
-			err = tx.Bucket([]byte("m")).Put([]byte("poo"), []byte(mjson)) //need the bucket id for this
+		select {
+		case m := <-BoltWriteChannel:
+			mjson, err := json.Marshal(m)
 			errLog(err)
-			return nil
-		})
+			boltClient.Update(func(tx *bolt.Tx) error {
+				// Set the value "bar" for the key "foo".
+				err = tx.Bucket([]byte("m")).Put([]byte("poo"), []byte(mjson)) //need the bucket id for this
+				errLog(err)
+				return nil
+			})
 
+		case <-ticker.C:
+			log.Println("Tick")
+			//auto upload code here
+		}
 	}
 }
 
