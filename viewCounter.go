@@ -1,14 +1,15 @@
 package main
 
 import (
-	//"encoding/json"
+	"encoding/json"
 	"fmt"
-	//"github.com/boltdb/bolt"
+	"github.com/boltdb/bolt"
 	"github.com/julienschmidt/httprouter"
 	"log"
 	"net/http"
 	"runtime"
 	"sync"
+	"time"
 )
 
 var BoltReadChannel = make(chan string)
@@ -24,32 +25,24 @@ var ips = struct {
 	m map[string]bool
 }{m: make(map[string]bool)}
 
-type DataPoint struct {
+type DataPoint struct { //possibly change to map[string]int instead of pageName and Viewcount
 	PageName    string
 	ViewCount   int
 	UniqueViews int
 }
 
-//buckets = days, new bucket for each day
-//key = page name, value = cumulative views
-//key = unique views, value = unique ids that day
-
-//maybe use an atomic counter for page veiws or a mutex
-
-//maybe use a map implemented as a set for the list of IPs
-//where the key is the ip and the value is anything (bool for small size)
-//you can use map len to find unique views for the day
-
-//bucket = unique ids
-//set a count at the start of a day, the increase by the end of the day is the unique views value from above
-
-//use a ticker to signal storing of the days bucket
+type SavePoint struct { //test
+	PageCounts  map[string]int
+	UniqueViews int
+}
 
 func main() {
 
 	procNo := runtime.NumCPU()
 	runtime.GOMAXPROCS(procNo)
 	fmt.Println("Using", procNo, "processors for maximum thread count")
+
+	go uploader()
 
 	router := httprouter.New()
 	router.GET("/count/:pageID", countHandler)
@@ -68,11 +61,6 @@ func countHandler(w http.ResponseWriter, r *http.Request, params httprouter.Para
 	counter.m[params.ByName("pageID")]++
 	counter.Unlock()
 
-	// counter.RLock()
-	// n := counter.m[params.ByName("pageID")]
-	// counter.RUnlock()
-	// log.Println(params.ByName("pageID"), n)
-
 	ips.Lock()
 	ips.m[r.RemoteAddr] = true
 	ips.Unlock()
@@ -81,12 +69,30 @@ func countHandler(w http.ResponseWriter, r *http.Request, params httprouter.Para
 func statsHandler(w http.ResponseWriter, r *http.Request, params httprouter.Params) {
 	log.Println("stat request from " + r.RemoteAddr)
 	if params.ByName("pswrd") == "opensaysame" {
+
 		fmt.Fprintln(w, "Hi there, heres your stats")
-		//read DB
+
+		counter.RLock()
+		fmt.Fprintln(w, counter.m)
+		counter.RUnlock()
+
+		counter.RLock()
+		fmt.Fprintln(w, "unique ips: ", len(ips.m))
+		counter.RUnlock()
+
 	} else {
 		fmt.Fprintln(w, "access denied")
 	}
+}
 
+func uploader() {
+	//ticker := time.NewTicker(time.Hour)
+	ticker := time.NewTicker(time.Second * 50)
+
+	for t := range ticker.C {
+		fmt.Println("Tick at", t)
+		//upload the count and unique IP to Bolt
+	}
 }
 
 func errFatal(err error) {
@@ -101,36 +107,36 @@ func errLog(err error) {
 	}
 }
 
-// func boltWriteClient() {
-// 	boltClient, err := bolt.Open("viewCounter.db", 0600, nil)
-// 	if err != nil {
-// 		log.Fatal(err)
-// 	}
-// 	defer boltClient.Close()
+func boltWriteClient() {
+	boltClient, err := bolt.Open("viewCounter.db", 0600, nil)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer boltClient.Close()
 
-// 	//do we need to check a bucket exists or make one
-// 	boltClient.Update(func(tx *bolt.Tx) error {
-// 		// Create a bucket.
-// 		tx.CreateBucketIfNotExists([]byte("m"))
-// 		return nil
-// 	})
+	//do we need to check a bucket exists or make one
+	boltClient.Update(func(tx *bolt.Tx) error {
+		// Create a bucket.
+		tx.CreateBucketIfNotExists([]byte("m"))
+		return nil
+	})
 
-// 	fmt.Println("bolt writer ready")
+	fmt.Println("bolt writer ready")
 
-// 	for {
+	for {
 
-// 		m := <-BoltWriteChannel
-// 		mjson, err := json.Marshal(m)
-// 		errLog(err)
-// 		boltClient.Update(func(tx *bolt.Tx) error {
-// 			// Set the value "bar" for the key "foo".
-// 			err = tx.Bucket([]byte("m")).Put([]byte("poo"), []byte(mjson)) //need the bucket id for this
-// 			errLog(err)
-// 			return nil
-// 		})
+		m := <-BoltWriteChannel
+		mjson, err := json.Marshal(m)
+		errLog(err)
+		boltClient.Update(func(tx *bolt.Tx) error {
+			// Set the value "bar" for the key "foo".
+			err = tx.Bucket([]byte("m")).Put([]byte("poo"), []byte(mjson)) //need the bucket id for this
+			errLog(err)
+			return nil
+		})
 
-// 	}
-// }
+	}
+}
 
 // func boltReadClient() {
 // 	boltClient, err := bolt.Open("viewCounter.db", 0600, nil) //maybe change the 600 to a read only value
