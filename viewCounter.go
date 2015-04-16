@@ -7,15 +7,12 @@ import (
 	"github.com/julienschmidt/httprouter"
 	"log"
 	"net/http"
+	"os"
 	"runtime"
 	"strconv"
 	"sync"
 	"time"
 )
-
-var BoltReadChannel = make(chan string)
-
-//var BoltWriteChannel = make(chan DataPoint)
 
 var counter = struct {
 	sync.RWMutex
@@ -37,6 +34,8 @@ type SavePoint struct {
 }
 
 func main() {
+
+	checkForRecords()
 
 	procNo := runtime.NumCPU()
 	runtime.GOMAXPROCS(procNo)
@@ -113,7 +112,7 @@ func boltWriteClient() {
 	fmt.Println("bolt writer ready")
 
 	//start a ticker for auto uploading
-	ticker := time.NewTicker(time.Hour)
+	ticker := time.NewTicker(time.Second * 10) //time.Hour)
 
 	for {
 
@@ -147,6 +146,9 @@ func boltWriteClient() {
 			err = tx.Bucket([]byte("historicData")).Put([]byte(date), []byte(m1json))
 			errLog(err)
 
+			err = tx.Bucket([]byte("historicData")).Put([]byte("current"), []byte(m1json))
+			errLog(err)
+
 			err = tx.Bucket([]byte("historicData")).Put([]byte("IPs"), []byte(m2json))
 			errLog(err)
 			return nil
@@ -155,29 +157,57 @@ func boltWriteClient() {
 	}
 }
 
-// func boltReadClient() {
-// 	boltClient, err := bolt.Open("viewCounter.db", 0600, nil) //maybe change the 600 to a read only value
-// 	if err != nil {
-// 		log.Fatal(err)
-// 	}
-// 	defer boltClient.Close()
+func checkForRecords() {
+	if _, err := os.Stat("viewCounter.db"); err == nil {
+		log.Println("viewCount.db database already exists; processing old entries")
 
-// 	fmt.Println("bolt reader ready")
+		boltClient, err := bolt.Open("viewCounter.db", 0600, nil) //maybe change the 600 to a read only value
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer boltClient.Close()
 
-// 	for {
-// 		id := <-BoltReadChannel
+		// fmt.Println("bolt reader ready")
 
-// 		var b []byte
-// 		boltClient.View(func(tx *bolt.Tx) error {
-// 			// Set the value "bar" for the key "foo".
-// 			b = tx.Bucket([]byte("m")).Get([]byte(id))
-// 			errLog(err)
+		// //id := <-BoltReadChannel
+		log.Println("point 0")
+		var b1, b2 []byte
+		boltClient.View(func(tx *bolt.Tx) error {
+			// Set the value "bar" for the key "foo".
+			b1 = tx.Bucket([]byte("historicData")).Get([]byte("current"))
+			errLog(err)
 
-// 			return nil
-// 		})
+			b2 = tx.Bucket([]byte("historicData")).Get([]byte("IPs"))
+			errLog(err)
 
-// 		//var mjson Message
-// 		//err := json.Unmarshal(b, &mjson)
+			return nil
+		})
 
-// 	}
-// }
+		var mjson1 SavePoint
+		err = json.Unmarshal(b1, &mjson1)
+		errLog(err)
+
+		for k, v := range mjson1.PageCounts {
+			counter.m[k] = v
+		}
+
+		log.Println("point 1")
+		log.Println("unique views", mjson1.UniqueViews)
+		log.Println(mjson1.PageCounts["wee"])
+
+		var mjson2 IPList
+		err = json.Unmarshal(b2, &mjson2)
+		errLog(err)
+
+		log.Println("point 2")
+		log.Println("unique IPs", len(mjson2.IPs))
+
+		for k, _ := range mjson2.IPs {
+			ips.m[k] = true
+		}
+
+	} else {
+		log.Println("viewCount.db not present; creating database")
+
+	}
+}
