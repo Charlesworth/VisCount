@@ -14,34 +14,49 @@ import (
 	"time"
 )
 
+//Instance of a [pageName]pageView hash map. This is implemented with a
+//mutex RW lock to stop goroutine data races
 var counter = struct {
 	sync.RWMutex
 	m map[string]int
 }{m: make(map[string]int)}
 
+//Instance of a [ipAdress]bool hash map. We don't care about the bool,
+//using a hash map in this case just for the IP Key, as it offers a
+//easy implementation on a set with quick insertion. This struct has a
+//mutex RW lock to stop goroutine data races
 var ips = struct {
 	sync.RWMutex
 	m map[string]bool
 }{m: make(map[string]bool)}
 
+//IPList struct is used to marshal/unmarshal IP visitor data into JSON
+//to be sent to current storage
 type IPList struct {
 	IPs map[string]bool
 }
 
+//SavePoint struct is used to marshal/unmarshal pageview data into JSON
+//to be sent to current and historic storage
 type SavePoint struct {
 	PageCounts  map[string]int
 	UniqueViews int
 }
 
+//Main checks checks for previos data, sets up multithreading and then
+//initiates the HTTP server
 func main() {
 
+	//checks for present DB storage and loads it into memory
 	checkForRecords()
 
+	//find the amount of available cores and set the runtime to
+	//utalize all of them
 	procNo := runtime.NumCPU()
-	runtime.GOMAXPROCS(procNo)
+	runtime.GOMAXPROCS(1)
 	fmt.Println("Using", procNo, "processors for maximum thread count")
 
-	go boltWriteClient()
+	go periodicMemoryWriter()
 
 	router := httprouter.New()
 	router.GET("/count/:pageID", countHandler)
@@ -53,6 +68,7 @@ func main() {
 	log.Fatal(http.ListenAndServe(":3000", nil))
 }
 
+//
 func countHandler(w http.ResponseWriter, r *http.Request, params httprouter.Params) {
 	log.Println(r.RemoteAddr + " requests " + params.ByName("pageID"))
 
@@ -95,7 +111,7 @@ func errLog(err error) {
 	}
 }
 
-func boltWriteClient() {
+func periodicMemoryWriter() {
 	boltClient, err := bolt.Open("viewCounter.db", 0600, nil)
 	if err != nil {
 		log.Fatal(err)
