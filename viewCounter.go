@@ -56,19 +56,21 @@ func main() {
 	runtime.GOMAXPROCS(1)
 	fmt.Println("Using", procNo, "processors for maximum thread count")
 
+	//start goroutine to periodicly write IP and page view sets to disk
 	go periodicMemoryWriter()
 
+	//set the HTTP routing for the server
 	router := httprouter.New()
 	router.GET("/count/:pageID", countHandler)
 	router.GET("/stats/:pswrd", statsHandler)
-
 	http.Handle("/", router)
 
+	//start the setver and listen for requests
 	log.Println("Listening...")
 	log.Fatal(http.ListenAndServe(":3000", nil))
 }
 
-//
+//countHandler locks the counter and ip set mutexes, write to both then unlocks
 func countHandler(w http.ResponseWriter, r *http.Request, params httprouter.Params) {
 	log.Println(r.RemoteAddr + " requests " + params.ByName("pageID"))
 
@@ -81,6 +83,9 @@ func countHandler(w http.ResponseWriter, r *http.Request, params httprouter.Para
 	ips.Unlock()
 }
 
+//statsHandler locks the counter and ip set read mutexes, retrieves the pageView
+//map and length of ip set (equates to number of unique ips) and then prints
+//them to the responce writer.
 func statsHandler(w http.ResponseWriter, r *http.Request, params httprouter.Params) {
 	log.Println("stat request from " + r.RemoteAddr)
 	if params.ByName("pswrd") == "opensaysame" {
@@ -99,41 +104,32 @@ func statsHandler(w http.ResponseWriter, r *http.Request, params httprouter.Para
 	}
 }
 
-func errFatal(err error) {
-	if err != nil {
-		log.Fatal(err)
-	}
-}
-
-func errLog(err error) {
-	if err != nil {
-		log.Print(err)
-	}
-}
-
+//periodicMemoryWriter initiates a BoltDB client, sets up a ticker and
+//then wrties the IP and pageView maps to on persistant memory via BoltDB.
+//This means that in the highly unlikely ;) case that the program crashes,
+//a restart will reload the data and your view count won't vanish.
 func periodicMemoryWriter() {
+	//start the bolt client
 	boltClient, err := bolt.Open("viewCounter.db", 0600, nil)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer boltClient.Close()
 
-	//do we need to check a bucket exists or make one
+	//check and create a bucket in bolt to store the data
 	boltClient.Update(func(tx *bolt.Tx) error {
-		// Create a bucket.
 		tx.CreateBucketIfNotExists([]byte("historicData"))
 		return nil
 	})
 
-	fmt.Println("bolt writer ready")
-
-	//start a ticker for auto uploading
-	ticker := time.NewTicker(time.Second * 10) //time.Hour)
+	//start a ticker for auto uploading the ips and view count to bolt
+	ticker := time.NewTicker(time.Second * 60) //time.Hour)
 
 	for {
 
 		<-ticker.C
 		log.Println("Tick")
+		fmt.Println("start:", time.Now())
 
 		date := strconv.Itoa((time.Now().YearDay() * 10000) + time.Now().Year())
 		fmt.Println(date)
@@ -170,9 +166,13 @@ func periodicMemoryWriter() {
 			return nil
 		})
 
+		fmt.Println("end:", time.Now())
+
 	}
 }
 
+//checkForRecords is used to see if a BoltDB database is present in the file system,
+//and if it is then to load the IP and pageview sets into program memory.
 func checkForRecords() {
 	if _, err := os.Stat("viewCounter.db"); err == nil {
 		log.Println("viewCount.db database already exists; processing old entries")
@@ -183,10 +183,6 @@ func checkForRecords() {
 		}
 		defer boltClient.Close()
 
-		// fmt.Println("bolt reader ready")
-
-		// //id := <-BoltReadChannel
-		log.Println("point 0")
 		var b1, b2 []byte
 		boltClient.View(func(tx *bolt.Tx) error {
 			// Set the value "bar" for the key "foo".
@@ -207,7 +203,6 @@ func checkForRecords() {
 			counter.m[k] = v
 		}
 
-		log.Println("point 1")
 		log.Println("unique views", mjson1.UniqueViews)
 		log.Println(mjson1.PageCounts["wee"])
 
@@ -215,7 +210,6 @@ func checkForRecords() {
 		err = json.Unmarshal(b2, &mjson2)
 		errLog(err)
 
-		log.Println("point 2")
 		log.Println("unique IPs", len(mjson2.IPs))
 
 		for k, _ := range mjson2.IPs {
@@ -225,5 +219,17 @@ func checkForRecords() {
 	} else {
 		log.Println("viewCount.db not present; creating database")
 
+	}
+}
+
+func errFatal(err error) {
+	if err != nil {
+		log.Fatal(err)
+	}
+}
+
+func errLog(err error) {
+	if err != nil {
+		log.Print(err)
 	}
 }
