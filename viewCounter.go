@@ -48,7 +48,7 @@ type SavePoint struct {
 func main() {
 
 	//checks for present DB storage and loads it into memory
-	checkForRecords()
+	checkForRecords("viewCounter.db")
 
 	//find the amount of available cores and set the runtime to
 	//utalize all of them
@@ -171,13 +171,13 @@ func periodicMemoryWriter() {
 	}
 }
 
-//checkForRecords is used to see if a BoltDB database is present in the file system,
+//checkForRecords is used to see if [viewDB] BoltDB database is present in the file system,
 //and if it is then to load the IP and pageview sets into program memory.
-func checkForRecords() {
-	if _, err := os.Stat("viewCounter.db"); err == nil {
-		log.Println("viewCount.db database already exists; processing old entries")
+func checkForRecords(viewDB string) {
+	if _, err := os.Stat(viewDB); err == nil {
+		log.Println(viewDB, "database already exists; processing old entries")
 
-		boltClient, err := bolt.Open("viewCounter.db", 0600, nil) //maybe change the 600 to a read only value
+		boltClient, err := bolt.Open(viewDB, 0600, nil) //maybe change the 600 to a read only value
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -185,7 +185,7 @@ func checkForRecords() {
 
 		var b1, b2 []byte
 		boltClient.View(func(tx *bolt.Tx) error {
-			// Set the value "bar" for the key "foo".
+
 			b1 = tx.Bucket([]byte("historicData")).Get([]byte("current"))
 			errLog(err)
 
@@ -212,19 +212,13 @@ func checkForRecords() {
 
 		log.Println("unique IPs", len(mjson2.IPs))
 
-		for k, _ := range mjson2.IPs {
+		for k := range mjson2.IPs {
 			ips.m[k] = true
 		}
 
 	} else {
-		log.Println("viewCount.db not present; creating database")
+		log.Println(viewDB, "not present; creating database")
 
-	}
-}
-
-func errFatal(err error) {
-	if err != nil {
-		log.Fatal(err)
 	}
 }
 
