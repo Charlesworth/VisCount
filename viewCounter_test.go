@@ -2,11 +2,13 @@ package main
 
 import (
 	//"errors"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/boltdb/bolt"
 	"github.com/julienschmidt/httprouter"
 )
 
@@ -41,19 +43,49 @@ import (
 
 func TestGetRecords(t *testing.T) { //not printing to logs
 
-	// DBName = "test.db"
-	//
-	// boltClient, err := bolt.Open(DBName, 0600, nil) //maybe change the 600 to a read only value
-	// errLog(err)
-	// defer boltClient.Close()
-	//
-	// boltClient.Update(func(tx *bolt.Tx) error {
-	// 	tx.CreateBucketIfNotExists([]byte("historicData"))
-	// 	return nil
-	// })
+	DBName = "test.db"
+
+	boltClient, err := bolt.Open(DBName, 0600, nil) //maybe change the 600 to a read only value
+	errLog(err)
+
+	boltClient.Update(func(tx *bolt.Tx) error {
+		tx.CreateBucketIfNotExists([]byte("historicData"))
+		return nil
+	})
+
+	//******************************************************
+	ips.m["123.456.789.0"] = true
+	counter.m["test1"]++
+	counter.m["test1"]++
+	counter.m["test2"]++
+
+	m1 := SavePoint{
+		PageCounts:  counter.m,  //2 test1 and 1 test2
+		UniqueViews: len(ips.m), //number 1
+	}
+
+	m2 := IPList{
+		IPs: ips.m, //make map with single IPs
+	}
+
+	m1json, err := json.Marshal(m1)
+	errLog(err)
+	m2json, err := json.Marshal(m2)
+	errLog(err)
+	boltClient.Update(func(tx *bolt.Tx) error {
+
+		err = tx.Bucket([]byte("historicData")).Put([]byte("current"), []byte(m1json))
+		errLog(err)
+
+		err = tx.Bucket([]byte("historicData")).Put([]byte("IPs"), []byte(m2json))
+		errLog(err)
+		return nil
+	})
+	boltClient.Close()
+	//****************************************************
 
 	//need to put some fake data into test.db with the ticker
-	err := GetRecords()
+	err = GetRecords()
 	if err != nil {
 		t.Error("checkForRecords returned an error:", err)
 	} else {
