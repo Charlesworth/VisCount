@@ -43,6 +43,7 @@ type SavePoint struct {
 	UniqueViews int
 }
 
+//DBName is the filename of the database
 var DBName = "viewCounter.db"
 
 //Main checks checks for previos data, sets up multithreading and then
@@ -51,7 +52,7 @@ func main() {
 
 	//checks for present DB storage and loads it into memory
 	if _, err := os.Stat(DBName); err == nil {
-		getRecords()
+		GetRecords()
 	}
 
 	//find the amount of available cores and set the runtime to
@@ -175,17 +176,16 @@ func periodicMemoryWriter() {
 	}
 }
 
-//checkForRecords is used to see if [viewDB] BoltDB database is present in the file system,
+//GetRecords is used to see if [viewDB] BoltDB database is present in the file system,
 //and if it is then to load the IP and pageview sets into program memory.
-func getRecords() (err error) {
+func GetRecords() (err error) {
 	log.Println("hello?")
 
 	log.Println(DBName, "database already exists; processing old entries")
 
 	boltClient, err := bolt.Open(DBName, 0600, nil) //maybe change the 600 to a read only value
-	if err != nil {
-		log.Fatal(err)
-	}
+	errLog(err)
+
 	defer boltClient.Close()
 
 	var b1, b2 []byte
