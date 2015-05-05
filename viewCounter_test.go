@@ -1,6 +1,7 @@
 package main
 
 import (
+	//"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -38,6 +39,22 @@ import (
 // 	fmt.Printf("99th percentile: %s\n", metrics.Latencies.P99)
 // }
 
+func TestgetRecords(t *testing.T) { //not printing to logs
+
+	DBName = "test.db"
+	err := getRecords()
+	if err != nil {
+		t.Error("checkForRecords returned an error:", err)
+	}
+
+	DBName = "viewCounter.db"
+	err = getRecords()
+	if err != nil {
+		t.Error("checkForRecords returned an error:", err)
+	}
+
+}
+
 type MockURL struct {
 	urlStr        string
 	expectedWCode int
@@ -69,3 +86,11 @@ func TestGetHandler(t *testing.T) {
 		}
 	}
 }
+
+// func TesterrLog(t *testing.T) {
+// 	err := errors.New("test")
+// 	errLog(err)
+// 	if w.Code != inputHTTP[i].expectedWCode {
+// 		t.Error("PutHandler test case", i, "returned", w.Code, "instead of", inputHTTP[i].expectedWCode)
+// 	}
+// }

@@ -43,12 +43,16 @@ type SavePoint struct {
 	UniqueViews int
 }
 
+var DBName = "viewCounter.db"
+
 //Main checks checks for previos data, sets up multithreading and then
 //initiates the HTTP server
 func main() {
 
 	//checks for present DB storage and loads it into memory
-	checkForRecords("viewCounter.db")
+	if _, err := os.Stat(DBName); err == nil {
+		getRecords()
+	}
 
 	//find the amount of available cores and set the runtime to
 	//utalize all of them
@@ -173,53 +177,47 @@ func periodicMemoryWriter() {
 
 //checkForRecords is used to see if [viewDB] BoltDB database is present in the file system,
 //and if it is then to load the IP and pageview sets into program memory.
-func checkForRecords(viewDB string) {
-	if _, err := os.Stat(viewDB); err == nil {
-		log.Println(viewDB, "database already exists; processing old entries")
+func getRecords() (err error) {
+	log.Println("hello?")
 
-		boltClient, err := bolt.Open(viewDB, 0600, nil) //maybe change the 600 to a read only value
-		if err != nil {
-			log.Fatal(err)
-		}
-		defer boltClient.Close()
+	log.Println(DBName, "database already exists; processing old entries")
 
-		var b1, b2 []byte
-		boltClient.View(func(tx *bolt.Tx) error {
-
-			b1 = tx.Bucket([]byte("historicData")).Get([]byte("current"))
-			errLog(err)
-
-			b2 = tx.Bucket([]byte("historicData")).Get([]byte("IPs"))
-			errLog(err)
-
-			return nil
-		})
-
-		var mjson1 SavePoint
-		err = json.Unmarshal(b1, &mjson1)
-		errLog(err)
-
-		for k, v := range mjson1.PageCounts {
-			counter.m[k] = v
-		}
-
-		log.Println("unique views", mjson1.UniqueViews)
-		log.Println(mjson1.PageCounts["wee"])
-
-		var mjson2 IPList
-		err = json.Unmarshal(b2, &mjson2)
-		errLog(err)
-
-		log.Println("unique IPs", len(mjson2.IPs))
-
-		for k := range mjson2.IPs {
-			ips.m[k] = true
-		}
-
-	} else {
-		log.Println(viewDB, "not present; creating database")
-
+	boltClient, err := bolt.Open(DBName, 0600, nil) //maybe change the 600 to a read only value
+	if err != nil {
+		log.Fatal(err)
 	}
+	defer boltClient.Close()
+
+	var b1, b2 []byte
+	boltClient.View(func(tx *bolt.Tx) error {
+
+		b1 = tx.Bucket([]byte("historicData")).Get([]byte("current"))
+		errLog(err)
+
+		b2 = tx.Bucket([]byte("historicData")).Get([]byte("IPs"))
+		errLog(err)
+
+		return nil
+	})
+
+	var mjson1 SavePoint
+	err = json.Unmarshal(b1, &mjson1)
+	errLog(err)
+
+	for k, v := range mjson1.PageCounts {
+		counter.m[k] = v
+	}
+
+	var mjson2 IPList
+	err = json.Unmarshal(b2, &mjson2)
+	errLog(err)
+
+	for k := range mjson2.IPs {
+		ips.m[k] = true
+	}
+
+	return err
+
 }
 
 func errLog(err error) {
