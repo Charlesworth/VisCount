@@ -3,8 +3,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/boltdb/bolt"
-	"github.com/julienschmidt/httprouter"
 	"log"
 	"net/http"
 	"os"
@@ -12,6 +10,9 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/boltdb/bolt"
+	"github.com/julienschmidt/httprouter"
 )
 
 //Instance of a [pageName]pageView hash map. This is implemented with a
@@ -49,17 +50,13 @@ var DBName = "viewCounter.db"
 //Main checks checks for previos data, sets up multithreading and then
 //initiates the HTTP server
 func main() {
+	//use only 1 core
+	runtime.GOMAXPROCS(1)
 
 	//checks for present DB storage and loads it into memory
 	if _, err := os.Stat(DBName); err == nil {
 		GetRecords()
 	}
-
-	//find the amount of available cores and set the runtime to
-	//utalize all of them
-	procNo := runtime.NumCPU()
-	runtime.GOMAXPROCS(1)
-	fmt.Println("Using", procNo, "processors for maximum thread count")
 
 	//start goroutine to periodicly write IP and page view sets to disk
 	go periodicMemoryWriter()
@@ -67,10 +64,11 @@ func main() {
 	//set the HTTP routing for the server
 	router := httprouter.New()
 	router.GET("/count/:pageID", countHandler)
+	router.GET("/jscount/:pageID/count.js", scriptHandler)
 	router.GET("/stats/:pswrd", statsHandler)
 	http.Handle("/", router)
 
-	//start the setver and listen for requests
+	//start the server and listen for requests
 	log.Println("Listening...")
 	log.Fatal(http.ListenAndServe(":3000", nil))
 }
@@ -86,6 +84,25 @@ func countHandler(w http.ResponseWriter, r *http.Request, params httprouter.Para
 	ips.Lock()
 	ips.m[r.RemoteAddr] = true
 	ips.Unlock()
+}
+
+//scriptHandler locks the counter and ip set mutexes, write to both then unlocks
+//and returns a script to show the view on the page
+func scriptHandler(w http.ResponseWriter, r *http.Request, params httprouter.Params) {
+	log.Println(r.RemoteAddr + " requests " + params.ByName("pageID"))
+
+	counter.Lock()
+	counter.m[params.ByName("pageID")]++
+	c := counter.m[params.ByName("pageID")]
+	counter.Unlock()
+
+	fmt.Println(c)
+
+	ips.Lock()
+	ips.m[r.RemoteAddr] = true
+	ips.Unlock()
+
+	fmt.Fprintf(w, "document.getElementById('viewCount').innerHTML = %v;", c)
 }
 
 //statsHandler locks the counter and ip set read mutexes, retrieves the pageView
@@ -128,13 +145,11 @@ func periodicMemoryWriter() {
 	})
 
 	//start a ticker for auto uploading the ips and view count to bolt
-	ticker := time.NewTicker(time.Second * 60) //time.Hour)
+	ticker := time.NewTicker(time.Second * 600)
 
 	for {
 
 		<-ticker.C
-		log.Println("Tick")
-		fmt.Println("start:", time.Now())
 
 		date := strconv.Itoa((time.Now().YearDay() * 10000) + time.Now().Year())
 		fmt.Println(date)
@@ -170,17 +185,12 @@ func periodicMemoryWriter() {
 			errLog(err)
 			return nil
 		})
-
-		fmt.Println("end:", time.Now())
-
 	}
 }
 
 //GetRecords is used to see if [viewDB] BoltDB database is present in the file system,
 //and if it is then to load the IP and pageview sets into program memory.
 func GetRecords() (err error) {
-	log.Println("hello?")
-
 	log.Println(DBName, "database already exists; processing old entries")
 
 	boltClient, err := bolt.Open(DBName, 0600, nil) //maybe change the 600 to a read only value
@@ -217,7 +227,6 @@ func GetRecords() (err error) {
 	}
 
 	return err
-
 }
 
 func errLog(err error) {
