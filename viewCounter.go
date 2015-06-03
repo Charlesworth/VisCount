@@ -96,13 +96,12 @@ func scriptHandler(w http.ResponseWriter, r *http.Request, params httprouter.Par
 	c := counter.m[params.ByName("pageID")]
 	counter.Unlock()
 
-	fmt.Println(c)
-
 	ips.Lock()
 	ips.m[r.RemoteAddr] = true
+	l := len(ips.m)
 	ips.Unlock()
 
-	fmt.Fprintf(w, "document.getElementById('viewCount').innerHTML = %v;", c)
+	fmt.Fprintf(w, "document.getElementById('viewCount').innerHTML = '%v Views, %v Unique IPs';", c, l)
 }
 
 //statsHandler locks the counter and ip set read mutexes, retrieves the pageView
