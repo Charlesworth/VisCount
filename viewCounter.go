@@ -69,6 +69,7 @@ func main() {
 	http.Handle("/", router)
 
 	//start the server and listen for requests
+	log.Println("VisCount View Counter, by Charles Cochrane")
 	log.Println("Listening...")
 	log.Fatal(http.ListenAndServe(":3000", nil))
 }
@@ -101,7 +102,7 @@ func scriptHandler(w http.ResponseWriter, r *http.Request, params httprouter.Par
 	l := len(ips.m)
 	ips.Unlock()
 
-	fmt.Fprintf(w, "document.getElementById('viewCount').innerHTML = '%v Views, %v Unique IPs';", c, l)
+	fmt.Fprintf(w, "document.getElementById('viewCount').innerHTML = '%v Page Views, %v Unique Site-wide Visitors';", c, l)
 }
 
 //statsHandler locks the counter and ip set read mutexes, retrieves the pageView
@@ -110,8 +111,6 @@ func scriptHandler(w http.ResponseWriter, r *http.Request, params httprouter.Par
 func statsHandler(w http.ResponseWriter, r *http.Request, params httprouter.Params) {
 	log.Println("stat request from " + r.RemoteAddr)
 	if params.ByName("pswrd") == "opensaysame" {
-
-		fmt.Fprintln(w, "Hi there, heres your stats")
 
 		counter.RLock()
 		fmt.Fprintln(w, counter.m)
@@ -151,7 +150,6 @@ func periodicMemoryWriter() {
 		<-ticker.C
 
 		date := strconv.Itoa((time.Now().YearDay() * 10000) + time.Now().Year())
-		fmt.Println(date)
 
 		counter.RLock()
 		ips.RLock()
